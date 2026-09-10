@@ -443,6 +443,11 @@ bool OnlineStatus=false;
 String onlineUser="NO_USER";
 bool SoftWareConnected=false;
 bool WiFiStatus=false;
+// Wi-Fi reconnect state. Reconnect attempts are deliberately non-blocking so
+// sampling, SD logging, and the display loop continue while the AP is absent.
+const unsigned long WIFI_RECONNECT_INTERVAL_MS = 10000;
+unsigned long wifiLastReconnectAttemptMs = 0;
+bool wifiReconnectAttempted = false;
 
 bool AutoShutdownbit=false;
 

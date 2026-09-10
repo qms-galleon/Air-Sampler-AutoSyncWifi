@@ -825,3 +825,24 @@ New route accepts ESP32 background POST JSON:
 ```
 
 Reason: the ESP32 can now push only fresh rows in the background. The server inserts/updates `sample_records` and inserts/skips duplicate `audit_trail` rows against the provided serial number.
+
+## 25. Automatic Wi-Fi reconnection and live Wi-Fi icon state
+
+Files: `VarDef.h`, `SDCard.ino`
+
+### Before
+
+```text
+CheckWiFi() only detected a lost connection and turned the Wi-Fi icon off. It did not attempt to reconnect, so Wi-Fi stayed unavailable until a restart or manual reconnect.
+```
+
+### After
+
+```cpp
+if (!connected) {
+  Set_Bit_Icons(1, 0);
+  WiFi.reconnect();
+}
+```
+
+Reason: the firmware now retries Wi-Fi every 10 seconds without blocking the sampling loop. The Wi-Fi icon turns off on the disconnect transition and turns on after the connection is restored; the local server and background sync are also notified after recovery.

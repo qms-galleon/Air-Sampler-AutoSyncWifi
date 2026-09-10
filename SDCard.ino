@@ -53,6 +53,7 @@ void ConnectToWiFi() {
   }
 
   WiFi.begin(ssid.c_str(), password2.c_str());
+  WiFi.setAutoReconnect(true);
 
   unsigned long startAttemptTime = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 10000) {
@@ -72,6 +73,9 @@ void ConnectToWiFi() {
   WriteString(0x00, 0x30, 0x00, WiFi.dnsIP().toString().c_str());
   WriteString(0x00, 0x31, 0x00, WiFi.macAddress().c_str());
   //String macAddress = WiFi.macAddress();
+  WiFiStatus = true;
+  LastSyncWiFiStatus = true;
+  wifiReconnectAttempted = false;
   Set_Bit_Icons(1, 1);
   LogActivity(useStaticIP ? "WIFI Connected (Static IP)" : "WIFI Connected (DHCP)");
 
@@ -139,19 +143,43 @@ void CreateFolders() {
    AuditId=ReadConfigParam1("/ActLog.csv");WriteTopway_32(0x00,0x08,AuditId-1);//WriteTopway(0x00,0xfc,AuditId); //AuditId
 }
 
- void CheckWiFi() {
-   if (WiFi.status() != WL_CONNECTED) {
-     WiFiStatus=false;
-     LastSyncWiFiStatus=false;
-     Set_Bit_Icons(1,0);
-   } else {
-     if(LastSyncWiFiStatus==false) {
-       NotifySyncEvent();
-     }
-     WiFiStatus=true;
-     LastSyncWiFiStatus=true;
-   }
- }
+void CheckWiFi() {
+  const bool connected = (WiFi.status() == WL_CONNECTED);
+
+  if (!connected) {
+    // Update the display only on the connected -> disconnected transition.
+    // This prevents a continuous stream of UART writes while the AP is down.
+    if (WiFiStatus || LastSyncWiFiStatus) {
+      Set_Bit_Icons(1, 0);
+      LogActivity("WIFI Disconnected");
+    }
+    WiFiStatus = false;
+    LastSyncWiFiStatus = false;
+
+    // WiFi.reconnect() returns immediately. The next check happens later,
+    // allowing the sampler and SD logger to keep running normally.
+    if (!wifiReconnectAttempted ||
+        (millis() - wifiLastReconnectAttemptMs >= WIFI_RECONNECT_INTERVAL_MS)) {
+      wifiLastReconnectAttemptMs = millis();
+      wifiReconnectAttempted = true;
+      WiFi.reconnect();
+    }
+    return;
+  }
+
+  // Connected: refresh the icon and network services only once per recovery.
+  if (!WiFiStatus || !LastSyncWiFiStatus) {
+    WiFiStatus = true;
+    LastSyncWiFiStatus = true;
+    wifiReconnectAttempted = false;
+    WriteString(0x00, 0x02, 0x00, WiFi.localIP().toString().c_str());
+    WriteString(0x00, 0x2e, 0x80, WiFi.localIP().toString().c_str());
+    Set_Bit_Icons(1, 1);
+    LogActivity("WIFI Reconnected");
+    wifiServer.begin();
+    NotifySyncEvent();
+  }
+}
 
 
 //void CheckWiFi() {
