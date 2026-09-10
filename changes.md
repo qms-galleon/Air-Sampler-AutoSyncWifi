@@ -807,6 +807,30 @@ POST /sync_device_esp_f3_push/<deviceID>
 
 Reason: this matches the database route style of your previous server code, where data is inserted against the serial number.
 
+## 26. REST API expanded for fresh operational CSV rows
+
+Files: `SyncManager.ino`, `VarDef.h`, `flask_air_sampler_sync_server.py`
+
+### Before
+
+```text
+The background API discovered fresh rows only from FR.csv and ActLog.csv.
+Other operational CSV files were not sent.
+```
+
+### After
+
+```text
+Fresh rows are tracked with an independent line cursor for DLS.csv, BatParam.csv,
+CAL.csv, GRP.csv, LOC.csv, RMK.csv, RECP.csv, DevInf.csv, and CompDet.csv.
+The Flask listener accepts the same POST endpoint and stores each additional source
+as a raw CSV record while retaining duplicate protection by record_id.
+```
+
+Reason: the ESP32 now sends only rows appended after each file's saved cursor. Existing rows are baselined on first discovery, so old SD-card data is not uploaded. `SERVCRED.csv`, `WIFICRED.csv`, `staticIP.csv`, `/USR.csv`, and `/SYNC/*` remain excluded because they contain credentials, passwords, configuration secrets, or internal sync state.
+
+The database route also stores non-sample/non-audit rows in `sync_csv_records` with a unique `(serial_number, record_id)` key, so the firmware receives an acknowledgement only after the row is stored or confirmed as a duplicate.
+
 ## 24. Database push-route example added
 
 File: `flask_air_sampler_push_db_route.py`

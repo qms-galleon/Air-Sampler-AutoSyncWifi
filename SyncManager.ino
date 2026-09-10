@@ -139,10 +139,8 @@ void SyncManagerTick() {
   syncLastSuccessMs = millis();
   SaveSyncState("OK");
 
-  // Step 7 foundation only:
-  // - No upload/download yet.
-  // - No existing CSV format changes.
-  // - Pending records are discovered into /SYNC/pending.csv only.
+  // Discover and upload only fresh rows. Existing CSV formats are preserved;
+  // pending state and per-file cursors stay under /SYNC/.
   syncState = SYNC_LOAD_STATE;
   vTaskDelay(pdMS_TO_TICKS(10));
   SaveSyncState("OK");
@@ -457,6 +455,98 @@ unsigned long DiscoverPendingRecords() {
   unsigned long discovered = 0;
   discovered += DiscoverPendingFromFile("SAMPLE", "/FR.csv", true);
   discovered += DiscoverPendingFromFile("AUDIT", "/ActLog.csv", false);
+
+  // Append-only operational CSV files. Credential and internal sync files are
+  // intentionally not listed here and are never sent to the server.
+  const char* extraSources[][2] = {
+    {"DLS",  "/DLS.csv"},
+    {"BAT",  "/BatParam.csv"},
+    {"CAL",  "/CAL.csv"},
+    {"GROUP", "/GRP.csv"},
+    {"LOCATION", "/LOC.csv"},
+    {"REMARK", "/RMK.csv"},
+    {"RECIPE", "/RECP.csv"},
+    {"DEVICE", "/DevInf.csv"},
+    {"COMPONENT", "/CompDet.csv"}
+  };
+
+  const uint8_t extraSourceCount = sizeof(extraSources) / sizeof(extraSources[0]);
+  for(uint8_t i = 0; i < extraSourceCount; i++) {
+    discovered += DiscoverPendingFromLineFile(extraSources[i][0], extraSources[i][1]);
+  }
+
+  return discovered;
+}
+
+unsigned long DiscoverPendingFromLineFile(const char* recordType, const char* sourceFile) {
+  unsigned long discovered = 0;
+  unsigned long lastKnownRecord = 0;
+  unsigned long lastKnownLine = 0;
+  unsigned long sourceLine = 0;
+  unsigned long maxSourceLine = 0;
+
+  if(recordType == NULL || sourceFile == NULL) {
+    return 0;
+  }
+
+  // First sight of a file creates a baseline. Existing rows are not uploaded;
+  // only rows appended after this cursor are considered fresh.
+  if(!GetSyncCursor(recordType, &lastKnownRecord, &lastKnownLine)) {
+    if(SdLock(SYNC_SD_LOCK_TIMEOUT_MS)) {
+      File source = SD.open(sourceFile, FILE_READ);
+      if(source) {
+        while(source.available()) {
+          String row = source.readStringUntil('\n');
+          sourceLine++;
+          row.trim();
+          if(row.length() > 0) {
+            maxSourceLine = sourceLine;
+          }
+        }
+        source.close();
+      }
+      SdUnlock();
+    }
+    SaveSyncCursor(recordType, sourceFile, maxSourceLine, maxSourceLine);
+    return 0;
+  }
+
+  if(SdLock(SYNC_SD_LOCK_TIMEOUT_MS)) {
+    File source = SD.open(sourceFile, FILE_READ);
+    File pending = SD.open(SYNC_PENDING_FILE, O_WRITE | O_CREAT | O_APPEND);
+
+    if(source && pending) {
+      while(source.available()) {
+        String row = source.readStringUntil('\n');
+        sourceLine++;
+        row.trim();
+        if(row.length() == 0) {
+          continue;
+        }
+
+        maxSourceLine = sourceLine;
+        if(sourceLine <= lastKnownLine) {
+          continue;
+        }
+
+        String recordId = BuildSyncRecordId(recordType, sourceLine);
+        pending.print(recordType); pending.print(",");
+        pending.print(recordId); pending.print(",");
+        pending.print(sourceFile); pending.print(",");
+        pending.print(sourceLine); pending.print(",PENDING,0,0\n");
+        discovered++;
+      }
+      pending.flush();
+    }
+
+    if(source) source.close();
+    if(pending) pending.close();
+    SdUnlock();
+  }
+
+  if(maxSourceLine > lastKnownLine) {
+    SaveSyncCursor(recordType, sourceFile, maxSourceLine, maxSourceLine);
+  }
 
   return discovered;
 }

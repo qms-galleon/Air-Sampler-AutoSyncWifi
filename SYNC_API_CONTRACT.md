@@ -405,6 +405,27 @@ Recommended:
 - JSON response under 2 KB.
 - CSV download file size declared before or in headers.
 - Upload ACK response includes only summary plus failed IDs.
+
+## Firmware fresh-row push endpoint
+
+The current firmware uses the following REST endpoint:
+
+```http
+POST /sync_device_esp_f3_push/{serial_number}
+Content-Type: application/json
+```
+
+The request contains only rows discovered after the independent per-file cursor
+on the ESP32 SD card. The first discovery of a file creates a baseline and sends
+no historical rows. The server must treat `record_id` as an idempotency key and
+return HTTP 200 with `received_ids` and `duplicate_ids`; the ESP32 marks the
+pending row `UPLOADED` only after HTTP 200.
+
+Fresh operational sources are `/FR.csv`, `/ActLog.csv`, `/DLS.csv`,
+`/BatParam.csv`, `/CAL.csv`, `/GRP.csv`, `/LOC.csv`, `/RMK.csv`, `/RECP.csv`,
+`/DevInf.csv`, and `/CompDet.csv`. Credential and internal files
+`/SERVCRED.csv`, `/WIFICRED.csv`, `/staticIP.csv`, `/USR.csv`, and `/SYNC/*`
+are never uploaded.
 - No large HTML responses.
 
 ## 13. Security notes
@@ -459,4 +480,3 @@ POST /api/air-sampler/v1/sync/ack
 ```
 
 If backend cannot be changed yet, implement SyncManager skeleton and persistent state first, then wire endpoints once server behavior is confirmed.
-

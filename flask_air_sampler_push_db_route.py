@@ -54,6 +54,8 @@ def sync_device_from_esp_f3_push(serial_number):
     inserted_counts = {"FR.csv": 0, "ActLog.csv": 0}
     updated_counts = {"FR.csv": 0, "ActLog.csv": 0}
     skipped_counts = {"FR.csv": 0, "ActLog.csv": 0}
+    generic_inserted = 0
+    generic_skipped = 0
     errors = []
     received_ids = []
     duplicate_ids = []
@@ -80,6 +82,26 @@ def sync_device_from_esp_f3_push(serial_number):
 
         unit_name = config_row[0] if config_row else "Unit1"
         equipment_id = config_row[1] if config_row else "EQ001"
+
+        # Raw operational CSV rows have no fixed business schema. Keep them in
+        # an idempotent table so non-sample files are acknowledged only after
+        # they are actually stored.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sync_csv_records (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                serial_number VARCHAR(128) NOT NULL,
+                record_id VARCHAR(255) NOT NULL,
+                record_type VARCHAR(64) NOT NULL,
+                source_file VARCHAR(255) NOT NULL,
+                source_line BIGINT NULL,
+                firmware VARCHAR(128) NULL,
+                raw_csv LONGTEXT NOT NULL,
+                received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_sync_csv_device_record (serial_number, record_id)
+            )
+            """
+        )
 
         for record in records:
             if not isinstance(record, dict):
@@ -199,6 +221,38 @@ def sync_device_from_esp_f3_push(serial_number):
                         skipped_counts["ActLog.csv"] += 1
                         duplicate_ids.append(record_id)
 
+                else:
+                    cur.execute(
+                        """SELECT id FROM sync_csv_records
+                           WHERE serial_number=%s AND record_id=%s LIMIT 1""",
+                        (serial_number, record_id),
+                    )
+                    generic_existing = cur.fetchone() is not None
+
+                    if generic_existing:
+                        generic_skipped += 1
+                        duplicate_ids.append(record_id)
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO sync_csv_records
+                                (serial_number, record_id, record_type, source_file,
+                                 source_line, firmware, raw_csv)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            [
+                                serial_number,
+                                record_id,
+                                record_type or "CSV",
+                                source_file,
+                                record.get("source_line"),
+                                payload.get("firmware", ""),
+                                record.get("csv", ""),
+                            ],
+                        )
+                        generic_inserted += 1
+                        received_ids.append(record_id)
+
                 conn.commit()
 
             except Exception as row_error:
@@ -213,6 +267,8 @@ def sync_device_from_esp_f3_push(serial_number):
             "inserted": inserted_counts,
             "updated": updated_counts,
             "skipped_duplicates": skipped_counts,
+            "generic_inserted": generic_inserted,
+            "generic_skipped_duplicates": generic_skipped,
             "received_ids": received_ids,
             "duplicate_ids": duplicate_ids,
             "errors": errors[:10],

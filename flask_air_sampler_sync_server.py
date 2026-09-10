@@ -3,6 +3,7 @@ from pathlib import Path
 import csv
 import json
 import os
+import re
 
 from flask import Flask, jsonify, request
 
@@ -196,6 +197,35 @@ def save_audit_record(device_id: str, firmware: str, record: dict, server_time: 
     )
 
 
+def save_generic_record(device_id: str, firmware: str, record: dict, server_time: str):
+    """Store fresh non-sample CSV rows without changing their raw format."""
+    source_file = str(record.get("source_file", "unknown.csv"))
+    source_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", source_file.strip("/")) or "unknown.csv"
+    append_dict_csv(
+        DATA_DIR / f"{device_id}_{source_name}_records.csv",
+        [
+            "server_time_utc",
+            "device_id",
+            "firmware",
+            "record_type",
+            "record_id",
+            "source_file",
+            "source_line",
+            "raw_csv",
+        ],
+        {
+            "server_time_utc": server_time,
+            "device_id": device_id,
+            "firmware": firmware,
+            "record_type": record.get("record_type", ""),
+            "record_id": record.get("record_id", ""),
+            "source_file": source_file,
+            "source_line": record.get("source_line", ""),
+            "raw_csv": record.get("csv", ""),
+        },
+    )
+
+
 @app.before_request
 def log_request():
     print(
@@ -323,6 +353,8 @@ def receive_records(serial_number=None):
                 save_sample_record(device_id, firmware, record, server_time)
             elif record_type == "AUDIT":
                 save_audit_record(device_id, firmware, record, server_time)
+            else:
+                save_generic_record(device_id, firmware, record, server_time)
             save_sync_status(device_id, record, "RECEIVED", server_time)
         except Exception as exc:
             save_sync_status(device_id, record, f"PARSE_ERROR:{exc}", server_time)

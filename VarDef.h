@@ -564,3 +564,4 @@ bool LoadNextPendingRecord(SyncPendingRecord *record);
 bool UploadPendingRecord(SyncPendingRecord *record);
 bool UpdatePendingRecordStatus(const char* recordId, const char* newStatus, unsigned long attempts);
 unsigned long UploadPendingRecords(uint8_t maxRecords);
+unsigned long DiscoverPendingFromLineFile(const char* recordType, const char* sourceFile);
