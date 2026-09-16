@@ -947,6 +947,31 @@ bool LoadNextPendingRecord(SyncPendingRecord *record) {
   return true;
 }
 
+// Preserve CSV column order as a JSON string array, including quoted commas.
+String SyncJsonFields(const String& row) {
+  String result = "[";
+  String field = "";
+  bool quoted = false;
+  for(unsigned int i = 0; i < row.length(); i++) {
+    char c = row[i];
+    if(c == '"') {
+      if(quoted && i + 1 < row.length() && row[i + 1] == '"') {
+        field += '"';
+        i++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if(c == ',' && !quoted) {
+      result += "\"" + JsonEscape(field) + "\",";
+      field = "";
+    } else {
+      field += c;
+    }
+  }
+  result += "\"" + JsonEscape(field) + "\"]";
+  return result;
+}
+
 bool UploadPendingRecord(SyncPendingRecord *record) {
   if(record == NULL) {
     return false;
@@ -957,7 +982,9 @@ bool UploadPendingRecord(SyncPendingRecord *record) {
     return false;
   }
 
-  String body = "{\"device_id\":\"";
+  String body = "{\"serial_number\":\"";
+  body += JsonEscape(deviceID);
+  body += "\",\"device_id\":\"";
   body += JsonEscape(deviceID);
   body += "\",\"firmware\":\"";
   body += JsonEscape(SoftwareVer);
@@ -969,6 +996,8 @@ bool UploadPendingRecord(SyncPendingRecord *record) {
   body += JsonEscape(record->sourceFile);
   body += "\",\"source_line\":";
   body += String(record->sourceLine);
+  body += ",\"fields\":";
+  body += SyncJsonFields(record->csvRow);
   body += ",\"csv\":\"";
   body += JsonEscape(record->csvRow);
   body += "\"}]}";
@@ -1002,20 +1031,35 @@ bool UploadPendingRecord(SyncPendingRecord *record) {
   unsigned long startMs = millis();
   String statusLine = "";
   statusLine.reserve(64);
+  bool firstLine = true;
+  bool httpOk = false;
+  bool recordAck = false;
 
   while((client.connected() || client.available()) && (millis() - startMs < SYNC_HTTP_RESPONSE_TIMEOUT_MS)) {
     while(client.available()) {
       char c = client.read();
       if(c == '\n') {
         statusLine.trim();
-        bool ok = statusLine.indexOf("200") > 0;
-        client.stop();
-        if(!ok) {
-          AppendSyncError("UPLOAD_NOT_OK", statusLine.c_str());
+        if(firstLine) {
+          httpOk = statusLine.startsWith("HTTP/1.1 200 ") || statusLine.startsWith("HTTP/1.0 200 ");
+          firstLine = false;
+        } else if(statusLine.length() == 0) {
+          client.stop();
+          if(!httpOk || !recordAck) AppendSyncError("UPLOAD_ACK_MISSING", record->recordId.c_str());
+          return httpOk && recordAck;
+        } else {
+          int colon = statusLine.indexOf(':');
+          if(colon > 0) {
+            String name = statusLine.substring(0, colon);
+            String value = statusLine.substring(colon + 1);
+            value.trim();
+            if(name.equalsIgnoreCase("X-Ack-Record-Id") && value == record->recordId) recordAck = true;
+          }
         }
-        return ok;
+        statusLine = "";
+        continue;
       }
-      if(statusLine.length() < 63 && c != '\r') {
+      if(statusLine.length() < 255 && c != '\r') {
         statusLine += c;
       }
     }

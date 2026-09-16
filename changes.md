@@ -1,5 +1,21 @@
 # Firmware Changes
 
+## 27. Serial-number JSON transport and durable listener (2026-09-16)
+
+Files: `SyncManager.ino`, `json_sync_listener.py`, `JSON_SYNC_SETUP.md`.
+
+Before: JSON contained only device_id and a raw CSV row; any HTTP 200 marked
+the pending record uploaded, even without a record acknowledgement.
+
+After: firmware also sends explicit serial_number and a JSON fields array.
+The new listener validates serial agreement and commits the JSON to SQLite with
+a unique device/record key. Firmware requires HTTP 200 and matching
+X-Ack-Record-Id before marking uploaded. Retry duplicates are acknowledged;
+conflicting payloads return 409. Use the new listener with this firmware.
+
+Existing cursor discovery is preserved. Rewritten files and edits to existing
+rows are not detected by line cursors; this update changes transport and ACKs.
+
 Issue fixed: after a user password expired, the self password reset flow allowed the user to continue without a clean login session. Samples could then be recorded with `NO_USER`, and the auto-shutdown timer could later trigger because the firmware still considered the device logged out.
 
 ## 1. Expired-password self reset now stays logged out
